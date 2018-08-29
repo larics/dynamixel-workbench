@@ -53,18 +53,19 @@ class PositionControl
   DynamixelWorkbench *dxl_wb_;
   uint8_t dxl_id_[16];
   uint8_t dxl_cnt_;
+  int voltage_old;
 
  public:
   PositionControl();
   ~PositionControl();
-  void controlLoop(void);
+  void controlLoop(bool read_voltage);
 
  private:
   void initMsg();
 
   void initPublisher();
   void initSubscriber();
-  void dynamixelStatePublish();
+  void dynamixelStatePublish(bool read_voltage);
   void jointStatePublish();
 
   void initServer();

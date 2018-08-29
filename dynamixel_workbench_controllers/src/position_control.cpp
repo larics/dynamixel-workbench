@@ -49,6 +49,8 @@ PositionControl::PositionControl()
   dxl_wb_->addSyncRead("Present_Current");
   dxl_wb_->addSyncRead("Present_Position");
   dxl_wb_->addSyncRead("Present_Velocity");
+  dxl_wb_->addSyncRead("Present_Input_Voltage");
+  voltage_old = 0;
   // BBULK
   /*dxl_wb_->initBulkRead();
   for (int index = 0; index < dxl_cnt_; index ++)
@@ -102,7 +104,7 @@ void PositionControl::initServer()
   joint_command_server_ = node_handle_.advertiseService("joint_command", &PositionControl::jointCommandMsgCallback, this);
 }
 
-void PositionControl::dynamixelStatePublish()
+void PositionControl::dynamixelStatePublish(bool read_voltage)
 {
   dynamixel_workbench_msgs::DynamixelState     dynamixel_state[dxl_cnt_];
   dynamixel_workbench_msgs::DynamixelStateList dynamixel_state_list;
@@ -123,6 +125,7 @@ void PositionControl::dynamixelStatePublish()
     //dynamixel_state[index].moving              = dxl_wb_->itemRead(dxl_id_[index], "Moving");
     //dynamixel_state[index].present_position    = present_position[index];
     dynamixel_state[index].present_current     = present_current[index];
+    dynamixel_state[index].present_current_real = double(dynamixel_state[index].present_current)*0.00269; // Convert to amps
     // BBULK
     //dynamixel_state[index].present_position    = dxl_wb_->bulkRead(dxl_id_[index], "Present_Position");
     //dynamixel_state[index].present_current     = dxl_wb_->bulkRead(dxl_id_[index], "Present_Current");
@@ -134,6 +137,26 @@ void PositionControl::dynamixelStatePublish()
   for (int index = 0; index < dxl_cnt_; index++)
   {
     dynamixel_state_list.dynamixel_state[index].present_position = present_position[index];
+    dynamixel_state_list.dynamixel_state[index].present_position_real = float(present_position[index]-2048)*0.0015358897;
+  }
+
+  if (read_voltage == true)
+  {
+    int32_t* present_input_voltage = dxl_wb_->syncRead("Present_Input_Voltage");
+    for (int index = 0; index < dxl_cnt_; index++)
+    {
+      dynamixel_state_list.dynamixel_state[index].present_input_voltage = present_input_voltage[index];
+      voltage_old = dynamixel_state_list.dynamixel_state[index].present_input_voltage;
+      dynamixel_state_list.dynamixel_state[index].present_input_voltage_real = float(dynamixel_state_list.dynamixel_state[index].present_input_voltage)*0.1;
+    }
+  }
+  else
+  {
+    for(int index = 0; index < dxl_cnt_; index++)
+    {
+      dynamixel_state_list.dynamixel_state[index].present_input_voltage = voltage_old;
+      dynamixel_state_list.dynamixel_state[index].present_input_voltage_real = float(dynamixel_state_list.dynamixel_state[index].present_input_voltage)*0.1;
+    }
   }
 
   /*int32_t* present_velocity = dxl_wb_->syncRead("Present_Velocity");
@@ -142,6 +165,13 @@ void PositionControl::dynamixelStatePublish()
     dynamixel_state_list.dynamixel_state[index].present_velocity = present_velocity[index];
   }*/
 
+  // Torque is based on parameters provided by robotis (graphically identified). T = (1.67I-0.05)*U/11.1
+  // The 11.1 is voltage the graph was provided with.
+  for(int index = 0; index < dxl_cnt_; index++)
+  {
+    dynamixel_state_list.dynamixel_state[index].present_torque_real = (1.67*dynamixel_state_list.dynamixel_state[index].present_current_real
+      -0.05)*(dynamixel_state_list.dynamixel_state[index].present_input_voltage_real/11.1);
+  }
 
   dynamixel_state_list_pub_.publish(dynamixel_state_list);
 }
@@ -174,9 +204,9 @@ void PositionControl::jointStatePublish()
   joint_states_pub_.publish(dynamixel_);
 }
 
-void PositionControl::controlLoop()
+void PositionControl::controlLoop(bool read_voltage)
 {
-  dynamixelStatePublish();
+  dynamixelStatePublish(read_voltage);
   //jointStatePublish();
 }
 
@@ -228,12 +258,23 @@ int main(int argc, char **argv)
   PositionControl pos_ctrl;
 
   ros::Rate loop_rate(250);
-
+  double start_time = ros::Time::now().toSec();
+  double elapsed_time = 0.0;
+  int voltage_iter = 0, voltage_iter_old = -1;
+  bool read_voltage = false;
   while (ros::ok())
   {
     loop_rate.sleep();
     ros::spinOnce();
-    pos_ctrl.controlLoop();
+    read_voltage = false;
+    elapsed_time = ros::Time::now().toSec() - start_time;
+    voltage_iter = floor(elapsed_time/15.0);
+    if (voltage_iter != voltage_iter_old)
+    {
+      voltage_iter_old = voltage_iter;
+      read_voltage = true;
+    }
+    pos_ctrl.controlLoop(read_voltage);
   }
 
   return 0;
