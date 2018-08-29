@@ -46,6 +46,16 @@ PositionControl::PositionControl()
     dxl_wb_->jointMode(dxl_id_[index], profile_velocity, profile_acceleration);
 
   dxl_wb_->addSyncWrite("Goal_Position");
+  dxl_wb_->addSyncRead("Present_Current");
+  dxl_wb_->addSyncRead("Present_Position");
+  dxl_wb_->addSyncRead("Present_Velocity");
+  // BBULK
+  /*dxl_wb_->initBulkRead();
+  for (int index = 0; index < dxl_cnt_; index ++)
+  {
+    dxl_wb_->addBulkReadParam(dxl_id_[index], "Present_Position");
+    dxl_wb_->addBulkReadParam(dxl_id_[index], "Present_Current");
+  }*/
 
   initPublisher();
   initSubscriber();
@@ -78,13 +88,13 @@ void PositionControl::initMsg()
 
 void PositionControl::initPublisher()
 {
-  dynamixel_state_list_pub_ = node_handle_.advertise<dynamixel_workbench_msgs::DynamixelStateList>("dynamixel_state", 10);
-  joint_states_pub_ = node_handle_.advertise<sensor_msgs::JointState>("joint_states", 10);
+  dynamixel_state_list_pub_ = node_handle_.advertise<dynamixel_workbench_msgs::DynamixelStateList>("dynamixel_state", 1);
+  joint_states_pub_ = node_handle_.advertise<sensor_msgs::JointState>("joint_states", 1);
 }
 
 void PositionControl::initSubscriber()
 {
-  joint_command_sub_ = node_handle_.subscribe("goal_dynamixel_position", 10, &PositionControl::goalJointPositionCallback, this);
+  joint_command_sub_ = node_handle_.subscribe("goal_dynamixel_position", 1, &PositionControl::goalJointPositionCallback, this);
 }
 
 void PositionControl::initServer()
@@ -96,20 +106,43 @@ void PositionControl::dynamixelStatePublish()
 {
   dynamixel_workbench_msgs::DynamixelState     dynamixel_state[dxl_cnt_];
   dynamixel_workbench_msgs::DynamixelStateList dynamixel_state_list;
+  
+  //bool temp = dxl_wb_->setBulkRead();
 
+  int32_t* present_current = dxl_wb_->syncRead("Present_Current");
   for (int index = 0; index < dxl_cnt_; index++)
   {
-    dynamixel_state[index].model_name          = std::string(dxl_wb_->getModelName(dxl_id_[index]));
+    //dynamixel_state[index].model_name          = std::string(dxl_wb_->getModelName(dxl_id_[index]));
     dynamixel_state[index].id                  = dxl_id_[index];
-    dynamixel_state[index].torque_enable       = dxl_wb_->itemRead(dxl_id_[index], "Torque_Enable");
-    dynamixel_state[index].present_position    = dxl_wb_->itemRead(dxl_id_[index], "Present_Position");
-    dynamixel_state[index].present_velocity    = dxl_wb_->itemRead(dxl_id_[index], "Present_Velocity");
-    dynamixel_state[index].goal_position       = dxl_wb_->itemRead(dxl_id_[index], "Goal_Position");
-    dynamixel_state[index].goal_velocity       = dxl_wb_->itemRead(dxl_id_[index], "Goal_Velocity");
-    dynamixel_state[index].moving              = dxl_wb_->itemRead(dxl_id_[index], "Moving");
+    //dynamixel_state[index].torque_enable       = dxl_wb_->itemRead(dxl_id_[index], "Torque_Enable");
+    //dynamixel_state[index].present_position    = dxl_wb_->itemRead(dxl_id_[index], "Present_Position");
+    //dynamixel_state[index].present_velocity    = dxl_wb_->itemRead(dxl_id_[index], "Present_Velocity");
+    //dynamixel_state[index].present_current     = dxl_wb_->itemRead(dxl_id_[index], "Present_Current");
+    //dynamixel_state[index].goal_position       = dxl_wb_->itemRead(dxl_id_[index], "Goal_Position");
+    //dynamixel_state[index].goal_velocity       = dxl_wb_->itemRead(dxl_id_[index], "Goal_Velocity");
+    //dynamixel_state[index].moving              = dxl_wb_->itemRead(dxl_id_[index], "Moving");
+    //dynamixel_state[index].present_position    = present_position[index];
+    dynamixel_state[index].present_current     = present_current[index];
+    // BBULK
+    //dynamixel_state[index].present_position    = dxl_wb_->bulkRead(dxl_id_[index], "Present_Position");
+    //dynamixel_state[index].present_current     = dxl_wb_->bulkRead(dxl_id_[index], "Present_Current");
 
     dynamixel_state_list.dynamixel_state.push_back(dynamixel_state[index]);
   }
+
+  int32_t* present_position = dxl_wb_->syncRead("Present_Position");
+  for (int index = 0; index < dxl_cnt_; index++)
+  {
+    dynamixel_state_list.dynamixel_state[index].present_position = present_position[index];
+  }
+
+  /*int32_t* present_velocity = dxl_wb_->syncRead("Present_Velocity");
+  for (int index = 0; index < dxl_cnt_; index++)
+  {
+    dynamixel_state_list.dynamixel_state[index].present_velocity = present_velocity[index];
+  }*/
+
+
   dynamixel_state_list_pub_.publish(dynamixel_state_list);
 }
 
@@ -144,7 +177,7 @@ void PositionControl::jointStatePublish()
 void PositionControl::controlLoop()
 {
   dynamixelStatePublish();
-  jointStatePublish();
+  //jointStatePublish();
 }
 
 bool PositionControl::jointCommandMsgCallback(dynamixel_workbench_msgs::JointCommand::Request &req,
@@ -198,9 +231,9 @@ int main(int argc, char **argv)
 
   while (ros::ok())
   {
-    pos_ctrl.controlLoop();
-    ros::spinOnce();
     loop_rate.sleep();
+    ros::spinOnce();
+    pos_ctrl.controlLoop();
   }
 
   return 0;
